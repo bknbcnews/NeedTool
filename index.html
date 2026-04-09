@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Outstanding Vote Calculator</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --text: #142033;
+      --muted: #5f6b7a;
+      --line: #d7dee8;
+      --accent: #1d4ed8;
+      --accent-2: #0f172a;
+      --good: #166534;
+      --warn: #92400e;
+      --bad: #b91c1c;
+      --shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, Arial, Helvetica, sans-serif;
+      background: linear-gradient(180deg, #eef4ff 0%, var(--bg) 100%);
+      color: var(--text);
+      padding: 28px;
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      gap: 20px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 22px;
+    }
+
+    h1, h2, h3 {
+      margin: 0 0 10px;
+      line-height: 1.2;
+    }
+
+    h1 { font-size: 2rem; }
+    h2 { font-size: 1.25rem; }
+    h3 { font-size: 1rem; }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .lead {
+      font-size: 1.03rem;
+      margin-top: 8px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .controls-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      font-weight: 700;
+      font-size: 0.94rem;
+    }
+
+    input, select, button {
+      font: inherit;
+    }
+
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 13px;
+      background: #fff;
+      color: var(--text);
+    }
+
+    input:focus, select:focus {
+      outline: 3px solid rgba(29, 78, 216, 0.14);
+      border-color: var(--accent);
+    }
+
+    .candidate-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+      overflow: hidden;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+    }
+
+    .candidate-table th,
+    .candidate-table td {
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+      background: #fff;
+    }
+
+    .candidate-table th {
+      font-size: 0.92rem;
+      color: var(--accent-2);
+      background: #f8fafc;
+    }
+
+    .candidate-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .candidate-name {
+      min-width: 150px;
+    }
+
+    .vote-input {
+      min-width: 150px;
+    }
+
+    .radio-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .secondary {
+      background: #e8edf5;
+      color: var(--accent-2);
+    }
+
+    .ghost {
+      background: transparent;
+      color: var(--bad);
+      border: 1px solid #f1c8c8;
+      padding: 8px 12px;
+    }
+
+    .result-card {
+      display: grid;
+      gap: 14px;
+    }
+
+    .big-number {
+      font-size: 2.25rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .sub-number {
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-weight: 700;
+      width: fit-content;
+    }
+
+    .pill.good { background: #e8f7eb; color: var(--good); }
+    .pill.warn { background: #fff3df; color: var(--warn); }
+    .pill.bad { background: #fdeaea; color: var(--bad); }
+
+    .note {
+      font-size: 0.94rem;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .formula-box {
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .error {
+      color: var(--bad);
+      font-weight: 700;
+      min-height: 1.2em;
+    }
+
+    .small {
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+
+    .hidden { display: none; }
+
+    @media (max-width: 900px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      body { padding: 16px; }
+      .controls-grid { grid-template-columns: 1fr; }
+      .candidate-table, .candidate-table thead, .candidate-table tbody, .candidate-table th, .candidate-table td, .candidate-table tr {
+        display: block;
+      }
+      .candidate-table thead {
+        display: none;
+      }
+      .candidate-table tr {
+        border-bottom: 1px solid var(--line);
+        padding: 10px;
+      }
+      .candidate-table td {
+        border: 0;
+        padding: 8px 0;
+      }
+      .candidate-table td::before {
+        content: attr(data-label);
+        display: block;
+        font-size: 0.84rem;
+        color: var(--muted);
+        margin-bottom: 4px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="panel">
+      <h1>Outstanding Vote Calculator</h1>
+      <p class="lead">Estimate what share of the remaining vote any candidate needs to finish in first, hit a custom threshold, win a majority, or satisfy both conditions at once.</p>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <h2>Candidates</h2>
+        <p>Add or remove candidates, enter current raw vote totals, then choose which candidate you want to test.</p>
+
+        <table class="candidate-table" id="candidateTable">
+          <thead>
+            <tr>
+              <th>Test</th>
+              <th>Candidate label</th>
+              <th>Current votes</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="candidateBody"></tbody>
+        </table>
+
+        <div class="buttons">
+          <button type="button" class="primary" id="addCandidateBtn">Add candidate</button>
+          <button type="button" class="secondary" id="resetBtn">Reset example</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Calculation settings</h2>
+        <div class="controls-grid">
+          <div class="field full">
+            <label for="mode">Rule</label>
+            <select id="mode">
+              <option value="first">Finish in 1st</option>
+              <option value="threshold">Reach custom threshold</option>
+              <option value="majority">Reach majority (50% + 1 vote)</option>
+              <option value="first_and_threshold">Finish in 1st and reach custom threshold</option>
+              <option value="first_and_majority">Finish in 1st and reach majority (50% + 1 vote)</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="remainingVotes">Estimated remaining vote</label>
+            <input id="remainingVotes" type="number" min="0" step="1" placeholder="Enter remaining vote" />
+          </div>
+
+          <div class="field" id="thresholdWrap">
+            <label for="thresholdPercent">Threshold percent</label>
+            <input id="thresholdPercent" type="number" min="0" max="100" step="0.01" placeholder="40" />
+          </div>
+        </div>
+
+        <div class="buttons">
+          <button type="button" class="primary" id="calculateBtn">Calculate</button>
+        </div>
+
+        <div class="error" id="errorBox"></div>
+      </section>
+    </div>
+
+    <section class="panel result-card">
+      <div>
+        <h2>Result</h2>
+        <p id="summaryText">Enter values and click calculate.</p>
+      </div>
+
+      <div class="pill warn" id="statusPill">Waiting for input</div>
+      <div class="big-number" id="percentNeeded">—</div>
+      <div class="sub-number" id="votesNeeded">—</div>
+
+      <div class="formula-box" id="detailsBox">The result will show the selected candidate’s minimum required share of outstanding vote under the conservative assumption that every remaining vote not won by that candidate goes to the strongest opponent when the goal includes finishing in first.</div>
+
+      <p class="note" id="noteText">For finish-in-1st calculations, the widget assumes all remaining votes not won by the selected candidate go to the strongest current opponent.</p>
+      <p class="small" id="metaText"></p>
+    </section>
+  </div>
+
+  <script>
+    const candidateBody = document.getElementById('candidateBody');
+    const addCandidateBtn = document.getElementById('addCandidateBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const calculateBtn = document.getElementById('calculateBtn');
+    const modeSelect = document.getElementById('mode');
+    const remainingVotesInput = document.getElementById('remainingVotes');
+    const thresholdPercentInput = document.getElementById('thresholdPercent');
+    const thresholdWrap = document.getElementById('thresholdWrap');
+    const errorBox = document.getElementById('errorBox');
+
+    const summaryText = document.getElementById('summaryText');
+    const statusPill = document.getElementById('statusPill');
+    const percentNeeded = document.getElementById('percentNeeded');
+    const votesNeeded = document.getElementById('votesNeeded');
+    const detailsBox = document.getElementById('detailsBox');
+    const noteText = document.getElementById('noteText');
+    const metaText = document.getElementById('metaText');
+
+    let candidateCount = 0;
+
+    function formatNumber(value) {
+      return new Intl.NumberFormat('en-US').format(value);
+    }
+
+    function formatPercent(value) {
+      return `${value.toFixed(2)}%`;
+    }
+
+    function ceilStrict(value) {
+      const epsilon = 1e-9;
+      return Math.floor(value + epsilon) + 1;
+    }
+
+    function setStatus(text, kind) {
+      statusPill.textContent = text;
+      statusPill.className = `pill ${kind}`;
+    }
+
+    function showThresholdField() {
+      const mode = modeSelect.value;
+      const needsThreshold = mode === 'threshold' || mode === 'first_and_threshold';
+      thresholdWrap.classList.toggle('hidden', !needsThreshold);
+    }
+
+    function createCandidateRow(name = '', votes = '') {
+      candidateCount += 1;
+      const tr = document.createElement('tr');
+      tr.dataset.index = String(candidateCount);
+      tr.innerHTML = `
+        <td data-label="Test">
+          <label class="radio-wrap">
+            <input type="radio" name="selectedCandidate" value="${candidateCount}" ${candidateCount === 1 ? 'checked' : ''} />
+            <span>Select</span>
+          </label>
+        </td>
+        <td data-label="Candidate label">
+          <input class="candidate-name" type="text" value="${name || `Candidate ${candidateCount}`}" />
+        </td>
+        <td data-label="Current votes">
+          <input class="vote-input" type="number" min="0" step="1" value="${votes}" placeholder="0" />
+        </td>
+        <td data-label="Action">
+          <button type="button" class="ghost remove-btn">Remove</button>
+        </td>
+      `;
+
+      tr.querySelector('.remove-btn').addEventListener('click', () => {
+        if (candidateBody.children.length <= 2) {
+          errorBox.textContent = 'Keep at least two candidates in the race.';
+          return;
+        }
+        const wasChecked = tr.querySelector('input[type="radio"]').checked;
+        tr.remove();
+        if (wasChecked) {
+          const firstRadio = document.querySelector('input[name="selectedCandidate"]');
+          if (firstRadio) firstRadio.checked = true;
+        }
+      });
+
+      candidateBody.appendChild(tr);
+    }
+
+    function loadExample() {
+      candidateBody.innerHTML = '';
+      candidateCount = 0;
+      createCandidateRow('Candidate 1', '47500');
+      createCandidateRow('Candidate 2', '44800');
+      createCandidateRow('Candidate 3', '9100');
+      remainingVotesInput.value = '12000';
+      modeSelect.value = 'first';
+      thresholdPercentInput.value = '40';
+      showThresholdField();
+      errorBox.textContent = '';
+      summaryText.textContent = 'Enter values and click calculate.';
+      setStatus('Waiting for input', 'warn');
+      percentNeeded.textContent = '—';
+      votesNeeded.textContent = '—';
+      detailsBox.textContent = 'The result will show the selected candidate’s minimum required share of outstanding vote under the conservative assumption that every remaining vote not won by that candidate goes to the strongest opponent when the goal includes finishing in first.';
+      noteText.textContent = 'For finish-in-1st calculations, the widget assumes all remaining votes not won by the selected candidate go to the strongest current opponent.';
+      metaText.textContent = '';
+    }
+
+    function readCandidates() {
+      const rows = Array.from(candidateBody.querySelectorAll('tr'));
+      return rows.map((row) => {
+        const id = row.dataset.index;
+        const name = row.querySelector('.candidate-name').value.trim() || `Candidate ${id}`;
+        const voteRaw = row.querySelector('.vote-input').value.trim();
+        if (voteRaw === '') {
+          throw new Error(`Enter current votes for ${name}.`);
+        }
+        const votes = Number(voteRaw);
+        if (!Number.isFinite(votes) || votes < 0) {
+          throw new Error(`Votes for ${name} must be 0 or more.`);
+        }
+        return { id, name, votes };
+      });
+    }
+
+    function calculate() {
+      errorBox.textContent = '';
+      try {
+        const candidates = readCandidates();
+        const selectedRadio = document.querySelector('input[name="selectedCandidate"]:checked');
+        if (!selectedRadio) throw new Error('Select a candidate to test.');
+
+        const selected = candidates.find((c) => c.id === selectedRadio.value);
+        if (!selected) throw new Error('Selected candidate not found.');
+
+        const remainingRaw = remainingVotesInput.value.trim();
+        if (remainingRaw === '') throw new Error('Enter estimated remaining vote.');
+        const remaining = Number(remainingRaw);
+        if (!Number.isFinite(remaining) || remaining < 0) throw new Error('Estimated remaining vote must be 0 or more.');
+
+        const totalCurrentVotes = candidates.reduce((sum, c) => sum + c.votes, 0);
+        const strongestOpponent = candidates
+          .filter((c) => c.id !== selected.id)
+          .sort((a, b) => b.votes - a.votes)[0];
+
+        const mode = modeSelect.value;
+        const needsThreshold = mode === 'threshold' || mode === 'first_and_threshold';
+        let thresholdPercent = null;
+
+        if (needsThreshold) {
+          const thresholdRaw = thresholdPercentInput.value.trim();
+          if (thresholdRaw === '') throw new Error('Enter a threshold percent.');
+          thresholdPercent = Number(thresholdRaw);
+          if (!Number.isFinite(thresholdPercent) || thresholdPercent < 0 || thresholdPercent > 100) {
+            throw new Error('Threshold percent must be between 0 and 100.');
+          }
+        }
+
+        const finalTotal = totalCurrentVotes + remaining;
+
+        let firstVotesNeeded = null;
+        let thresholdVotesNeeded = null;
+        let majorityVotesNeeded = null;
+        const reasons = [];
+
+        if (mode === 'first' || mode === 'first_and_threshold' || mode === 'first_and_majority') {
+          const strictNeed = (strongestOpponent.votes - selected.votes + remaining) / 2;
+          firstVotesNeeded = Math.max(0, ceilStrict(strictNeed));
+          reasons.push(`To finish ahead of ${strongestOpponent.name}, ${selected.name} must get at least ${formatNumber(firstVotesNeeded)} of the ${formatNumber(remaining)} estimated outstanding votes under the conservative assumption that every other remaining vote goes to ${strongestOpponent.name}.`);
+        }
+
+        if (mode === 'threshold' || mode === 'first_and_threshold') {
+          const requiredFinalVotes = Math.ceil((thresholdPercent / 100) * finalTotal - 1e-9);
+          thresholdVotesNeeded = Math.max(0, requiredFinalVotes - selected.votes);
+          reasons.push(`To hit ${thresholdPercent}% of the final vote, ${selected.name} must finish with at least ${formatNumber(requiredFinalVotes)} votes total.`);
+        }
+
+        if (mode === 'majority' || mode === 'first_and_majority') {
+          const requiredFinalVotes = Math.floor(finalTotal / 2) + 1;
+          majorityVotesNeeded = Math.max(0, requiredFinalVotes - selected.votes);
+          reasons.push(`To win a majority, ${selected.name} must finish with ${formatNumber(requiredFinalVotes)} votes, which is 50% plus 1 vote of the projected final total.`);
+        }
+
+        const requirements = [firstVotesNeeded, thresholdVotesNeeded, majorityVotesNeeded].filter((v) => v !== null);
+        const requiredVotes = Math.max(...requirements, 0);
+
+        let requiredShare;
+        if (remaining === 0) {
+          requiredShare = requiredVotes === 0 ? 0 : Infinity;
+        } else {
+          requiredShare = (requiredVotes / remaining) * 100;
+        }
+
+        let statusText = 'Reachable';
+        let statusKind = 'good';
+
+        if (requiredVotes === 0) {
+          statusText = 'Already satisfied';
+          statusKind = 'good';
+        } else if (requiredVotes > remaining) {
+          statusText = 'Not reachable';
+          statusKind = 'bad';
+        } else if (requiredShare > 90) {
+          statusText = 'Very steep path';
+          statusKind = 'warn';
+        }
+
+        setStatus(statusText, statusKind);
+
+        percentNeeded.textContent = Number.isFinite(requiredShare) ? formatPercent(requiredShare) : 'Not possible';
+        votesNeeded.textContent = `${formatNumber(requiredVotes)} raw outstanding votes needed`;
+
+        let summaryModeText = '';
+        switch (mode) {
+          case 'first':
+            summaryModeText = 'finish in 1st';
+            break;
+          case 'threshold':
+            summaryModeText = `hit ${thresholdPercent}%`; break;
+          case 'majority':
+            summaryModeText = 'win a majority'; break;
+          case 'first_and_threshold':
+            summaryModeText = `finish in 1st and hit ${thresholdPercent}%`; break;
+          case 'first_and_majority':
+            summaryModeText = 'finish in 1st and win a majority'; break;
+        }
+
+        if (!Number.isFinite(requiredShare)) {
+          summaryText.textContent = `${selected.name} cannot still ${summaryModeText} because there is no estimated remaining vote left and the requirement has not already been met.`;
+        } else {
+          summaryText.textContent = `${selected.name} needs ${formatPercent(requiredShare)} of the estimated outstanding vote to ${summaryModeText}.`;
+        }
+
+        detailsBox.innerHTML = reasons.map((r) => `<div>${r}</div>`).join('');
+        noteText.textContent = (mode === 'first' || mode === 'first_and_threshold' || mode === 'first_and_majority')
+          ? 'Finish-in-1st calculations assume every remaining vote not won by the selected candidate goes to the strongest current opponent.'
+          : 'Threshold-only calculations are based on the projected final vote total: current total votes plus estimated remaining vote.';
+
+        metaText.textContent = `Selected candidate: ${selected.name}. Current votes: ${formatNumber(selected.votes)}. Projected final total: ${formatNumber(finalTotal)}. Strongest current opponent: ${strongestOpponent.name} with ${formatNumber(strongestOpponent.votes)} votes.`;
+      } catch (error) {
+        setStatus('Check inputs', 'bad');
+        percentNeeded.textContent = '—';
+        votesNeeded.textContent = '—';
+        summaryText.textContent = 'Please correct the inputs and try again.';
+        detailsBox.textContent = 'The calculator needs valid vote totals, a selected candidate, and estimated remaining vote.';
+        noteText.textContent = 'For finish-in-1st calculations, the widget assumes all remaining votes not won by the selected candidate go to the strongest current opponent.';
+        metaText.textContent = '';
+        errorBox.textContent = error.message;
+      }
+    }
+
+    addCandidateBtn.addEventListener('click', () => {
+      createCandidateRow();
+      errorBox.textContent = '';
+    });
+
+    resetBtn.addEventListener('click', loadExample);
+    calculateBtn.addEventListener('click', calculate);
+    modeSelect.addEventListener('change', showThresholdField);
+
+    loadExample();
+  </script>
+</body>
+</html>
