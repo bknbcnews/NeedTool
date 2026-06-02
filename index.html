@@ -72,11 +72,16 @@
       align-items: start;
     }
 
-    .controls-grid {
+    .controls-grid,
+    .race-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 16px;
       margin-top: 16px;
+    }
+
+    .race-grid {
+      grid-template-columns: 1fr 1fr;
     }
 
     .field {
@@ -245,6 +250,32 @@
 
     .hidden { display: none; }
 
+    .race-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .race-badge {
+      background: #eef4ff;
+      border: 1px solid #dbe7ff;
+      color: var(--accent-2);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-weight: 800;
+      width: fit-content;
+    }
+
+    .muted-link-button {
+      background: transparent;
+      color: var(--accent);
+      padding: 0;
+      border-radius: 0;
+      font-weight: 800;
+    }
+
     @media (max-width: 900px) {
       .grid {
         grid-template-columns: 1fr;
@@ -253,7 +284,7 @@
 
     @media (max-width: 640px) {
       body { padding: 16px; }
-      .controls-grid { grid-template-columns: 1fr; }
+      .controls-grid, .race-grid { grid-template-columns: 1fr; }
       .candidate-table, .candidate-table thead, .candidate-table tbody, .candidate-table th, .candidate-table td, .candidate-table tr {
         display: block;
       }
@@ -285,6 +316,43 @@
       <p class="lead">Estimate what share of the remaining vote any candidate needs to finish in first, hit a custom threshold, win a majority, or satisfy both conditions at once.</p>
     </section>
 
+    <section class="panel">
+      <div class="race-title-row">
+        <div>
+          <h2>Race tracker</h2>
+          <p>Switch between multiple races. Each race keeps its own candidates, settings, remaining vote estimate, and vote-in reference.</p>
+        </div>
+        <div class="race-badge" id="activeRaceBadge">Current race</div>
+      </div>
+
+      <div class="race-grid">
+        <div class="field">
+          <label for="raceSelect">Current race</label>
+          <select id="raceSelect"></select>
+        </div>
+
+        <div class="field">
+          <label for="raceNameInput">Race label</label>
+          <input id="raceNameInput" type="text" placeholder="e.g. Mayor, CD-1, Prop A" />
+        </div>
+
+        <div class="field">
+          <label for="voteInPercent">Vote in % reference</label>
+          <input id="voteInPercent" type="number" min="0" max="100" step="0.01" placeholder="e.g. 60" />
+          <p class="small">This is a manual note only. It does not affect the math.</p>
+        </div>
+      </div>
+
+      <div class="buttons">
+        <button type="button" class="primary" id="saveRaceBtn">Save current race</button>
+        <button type="button" class="secondary" id="addRaceBtn">Add new race</button>
+        <button type="button" class="secondary" id="duplicateRaceBtn">Duplicate race</button>
+        <button type="button" class="ghost" id="deleteRaceBtn">Delete race</button>
+      </div>
+
+      <p class="small" id="saveStatus" style="margin-top: 12px;"></p>
+    </section>
+
     <div class="grid">
       <section class="panel">
         <h2>Candidates</h2>
@@ -304,7 +372,7 @@
 
         <div class="buttons">
           <button type="button" class="primary" id="addCandidateBtn">Add candidate</button>
-          <button type="button" class="secondary" id="resetBtn">Reset example</button>
+          <button type="button" class="secondary" id="resetBtn">Reset active race example</button>
         </div>
       </section>
 
@@ -359,6 +427,8 @@
   </div>
 
   <script>
+    const STORAGE_KEY = 'outstandingVoteCalculatorMultiRaceStateV1';
+
     const candidateBody = document.getElementById('candidateBody');
     const addCandidateBtn = document.getElementById('addCandidateBtn');
     const resetBtn = document.getElementById('resetBtn');
@@ -369,6 +439,16 @@
     const thresholdWrap = document.getElementById('thresholdWrap');
     const errorBox = document.getElementById('errorBox');
 
+    const raceSelect = document.getElementById('raceSelect');
+    const raceNameInput = document.getElementById('raceNameInput');
+    const voteInPercentInput = document.getElementById('voteInPercent');
+    const activeRaceBadge = document.getElementById('activeRaceBadge');
+    const saveRaceBtn = document.getElementById('saveRaceBtn');
+    const addRaceBtn = document.getElementById('addRaceBtn');
+    const duplicateRaceBtn = document.getElementById('duplicateRaceBtn');
+    const deleteRaceBtn = document.getElementById('deleteRaceBtn');
+    const saveStatus = document.getElementById('saveStatus');
+
     const summaryText = document.getElementById('summaryText');
     const statusPill = document.getElementById('statusPill');
     const percentNeeded = document.getElementById('percentNeeded');
@@ -378,6 +458,8 @@
     const metaText = document.getElementById('metaText');
 
     let candidateCount = 0;
+    let appState = { activeRaceId: '', races: [] };
+    let isLoadingRace = false;
 
     function formatNumber(value) {
       return new Intl.NumberFormat('en-US').format(value);
@@ -392,9 +474,23 @@
       return Math.floor(value + epsilon) + 1;
     }
 
+    function makeId(prefix = 'race') {
+      return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+
     function setStatus(text, kind) {
       statusPill.textContent = text;
       statusPill.className = `pill ${kind}`;
+    }
+
+    function setSaveStatus(text) {
+      saveStatus.textContent = text;
+      if (text) {
+        window.clearTimeout(setSaveStatus.timer);
+        setSaveStatus.timer = window.setTimeout(() => {
+          saveStatus.textContent = '';
+        }, 2500);
+      }
     }
 
     function showThresholdField() {
@@ -403,22 +499,33 @@
       thresholdWrap.classList.toggle('hidden', !needsThreshold);
     }
 
-    function createCandidateRow(name = '', votes = '') {
+    function resetResultDisplay() {
+      summaryText.textContent = 'Enter values and click calculate.';
+      setStatus('Waiting for input', 'warn');
+      percentNeeded.textContent = '—';
+      votesNeeded.textContent = '—';
+      detailsBox.textContent = 'The result will show the selected candidate’s minimum required share of outstanding vote under the conservative assumption that every remaining vote not won by that candidate goes to the strongest opponent when the goal includes finishing in first.';
+      noteText.textContent = 'For finish-in-1st calculations, the widget assumes all remaining votes not won by the selected candidate go to the strongest current opponent.';
+      metaText.textContent = '';
+      errorBox.textContent = '';
+    }
+
+    function createCandidateRow(name = '', votes = '', checked = false) {
       candidateCount += 1;
       const tr = document.createElement('tr');
       tr.dataset.index = String(candidateCount);
       tr.innerHTML = `
         <td data-label="Test">
           <label class="radio-wrap">
-            <input type="radio" name="selectedCandidate" value="${candidateCount}" ${candidateCount === 1 ? 'checked' : ''} />
+            <input type="radio" name="selectedCandidate" value="${candidateCount}" ${checked || candidateCount === 1 ? 'checked' : ''} />
             <span>Select</span>
           </label>
         </td>
         <td data-label="Candidate label">
-          <input class="candidate-name" type="text" value="${name || `Candidate ${candidateCount}`}" />
+          <input class="candidate-name" type="text" value="${escapeHtml(name || `Candidate ${candidateCount}`)}" />
         </td>
         <td data-label="Current votes">
-          <input class="vote-input" type="number" min="0" step="1" value="${votes}" placeholder="0" />
+          <input class="vote-input" type="number" min="0" step="1" value="${escapeHtml(String(votes))}" placeholder="0" />
         </td>
         <td data-label="Action">
           <button type="button" class="ghost remove-btn">Remove</button>
@@ -436,29 +543,224 @@
           const firstRadio = document.querySelector('input[name="selectedCandidate"]');
           if (firstRadio) firstRadio.checked = true;
         }
+        autoSaveActiveRace();
+      });
+
+      tr.querySelectorAll('input').forEach((input) => {
+        input.addEventListener('input', autoSaveActiveRace);
+        input.addEventListener('change', autoSaveActiveRace);
       });
 
       candidateBody.appendChild(tr);
     }
 
-    function loadExample() {
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function defaultRace(label = 'Race 1') {
+      return {
+        id: makeId(),
+        label,
+        voteInPercent: '',
+        remainingVotes: '12000',
+        mode: 'first',
+        thresholdPercent: '40',
+        selectedCandidateIndex: 0,
+        candidates: [
+          { name: 'Candidate 1', votes: '47500' },
+          { name: 'Candidate 2', votes: '44800' },
+          { name: 'Candidate 3', votes: '9100' }
+        ]
+      };
+    }
+
+    function readCandidatesForSave() {
+      const rows = Array.from(candidateBody.querySelectorAll('tr'));
+      const selectedRadio = document.querySelector('input[name="selectedCandidate"]:checked');
+      let selectedCandidateIndex = 0;
+
+      const candidates = rows.map((row, index) => {
+        if (selectedRadio && row.dataset.index === selectedRadio.value) {
+          selectedCandidateIndex = index;
+        }
+        const name = row.querySelector('.candidate-name').value.trim() || `Candidate ${index + 1}`;
+        const votes = row.querySelector('.vote-input').value.trim();
+        return { name, votes };
+      });
+
+      return { candidates, selectedCandidateIndex };
+    }
+
+    function readRaceFromForm() {
+      const { candidates, selectedCandidateIndex } = readCandidatesForSave();
+      return {
+        id: appState.activeRaceId || makeId(),
+        label: raceNameInput.value.trim() || 'Untitled race',
+        voteInPercent: voteInPercentInput.value.trim(),
+        remainingVotes: remainingVotesInput.value.trim(),
+        mode: modeSelect.value,
+        thresholdPercent: thresholdPercentInput.value.trim(),
+        selectedCandidateIndex,
+        candidates
+      };
+    }
+
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
+    }
+
+    function loadState() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && Array.isArray(parsed.races) && parsed.races.length > 0) {
+            appState = parsed;
+            if (!appState.activeRaceId || !appState.races.some((race) => race.id === appState.activeRaceId)) {
+              appState.activeRaceId = appState.races[0].id;
+            }
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn('Unable to load saved race state:', error);
+      }
+
+      const firstRace = defaultRace('Example race');
+      appState = {
+        activeRaceId: firstRace.id,
+        races: [firstRace]
+      };
+      saveState();
+    }
+
+    function activeRace() {
+      return appState.races.find((race) => race.id === appState.activeRaceId) || appState.races[0];
+    }
+
+    function renderRaceSelect() {
+      raceSelect.innerHTML = '';
+      appState.races.forEach((race) => {
+        const option = document.createElement('option');
+        option.value = race.id;
+        const voteInText = race.voteInPercent !== '' ? ` — ${race.voteInPercent}% in` : '';
+        option.textContent = `${race.label || 'Untitled race'}${voteInText}`;
+        raceSelect.appendChild(option);
+      });
+      raceSelect.value = appState.activeRaceId;
+    }
+
+    function loadRaceIntoForm(race) {
+      isLoadingRace = true;
       candidateBody.innerHTML = '';
       candidateCount = 0;
-      createCandidateRow('Candidate 1', '47500');
-      createCandidateRow('Candidate 2', '44800');
-      createCandidateRow('Candidate 3', '9100');
-      remainingVotesInput.value = '12000';
-      modeSelect.value = 'first';
-      thresholdPercentInput.value = '40';
+
+      raceNameInput.value = race.label || '';
+      voteInPercentInput.value = race.voteInPercent || '';
+      remainingVotesInput.value = race.remainingVotes || '';
+      modeSelect.value = race.mode || 'first';
+      thresholdPercentInput.value = race.thresholdPercent || '40';
+
+      const candidates = Array.isArray(race.candidates) && race.candidates.length >= 2
+        ? race.candidates
+        : defaultRace().candidates;
+
+      candidates.forEach((candidate, index) => {
+        createCandidateRow(candidate.name, candidate.votes, index === (race.selectedCandidateIndex || 0));
+      });
+
       showThresholdField();
-      errorBox.textContent = '';
-      summaryText.textContent = 'Enter values and click calculate.';
-      setStatus('Waiting for input', 'warn');
-      percentNeeded.textContent = '—';
-      votesNeeded.textContent = '—';
-      detailsBox.textContent = 'The result will show the selected candidate’s minimum required share of outstanding vote under the conservative assumption that every remaining vote not won by that candidate goes to the strongest opponent when the goal includes finishing in first.';
-      noteText.textContent = 'For finish-in-1st calculations, the widget assumes all remaining votes not won by the selected candidate go to the strongest current opponent.';
-      metaText.textContent = '';
+      activeRaceBadge.textContent = `${race.label || 'Untitled race'}${race.voteInPercent !== '' ? ` • ${race.voteInPercent}% in` : ''}`;
+      resetResultDisplay();
+      isLoadingRace = false;
+    }
+
+    function updateActiveRaceFromForm() {
+      const current = readRaceFromForm();
+      const index = appState.races.findIndex((race) => race.id === appState.activeRaceId);
+      if (index >= 0) {
+        appState.races[index] = { ...current, id: appState.activeRaceId };
+      } else {
+        appState.races.push(current);
+        appState.activeRaceId = current.id;
+      }
+      saveState();
+      renderRaceSelect();
+      const race = activeRace();
+      activeRaceBadge.textContent = `${race.label || 'Untitled race'}${race.voteInPercent !== '' ? ` • ${race.voteInPercent}% in` : ''}`;
+    }
+
+    function autoSaveActiveRace() {
+      if (isLoadingRace) return;
+      updateActiveRaceFromForm();
+    }
+
+    function resetActiveRaceExample() {
+      const label = raceNameInput.value.trim() || activeRace().label || 'Example race';
+      const resetRace = defaultRace(label);
+      resetRace.id = appState.activeRaceId;
+      const index = appState.races.findIndex((race) => race.id === appState.activeRaceId);
+      appState.races[index] = resetRace;
+      saveState();
+      renderRaceSelect();
+      loadRaceIntoForm(resetRace);
+      setSaveStatus('Active race reset to the example values.');
+    }
+
+    function addNewRace() {
+      updateActiveRaceFromForm();
+      const newRaceNumber = appState.races.length + 1;
+      const race = defaultRace(`Race ${newRaceNumber}`);
+      race.candidates = [
+        { name: 'Candidate 1', votes: '' },
+        { name: 'Candidate 2', votes: '' }
+      ];
+      race.remainingVotes = '';
+      race.voteInPercent = '';
+      appState.races.push(race);
+      appState.activeRaceId = race.id;
+      saveState();
+      renderRaceSelect();
+      loadRaceIntoForm(race);
+      setSaveStatus('New race added.');
+    }
+
+    function duplicateActiveRace() {
+      updateActiveRaceFromForm();
+      const source = activeRace();
+      const copy = JSON.parse(JSON.stringify(source));
+      copy.id = makeId();
+      copy.label = `${source.label || 'Untitled race'} copy`;
+      appState.races.push(copy);
+      appState.activeRaceId = copy.id;
+      saveState();
+      renderRaceSelect();
+      loadRaceIntoForm(copy);
+      setSaveStatus('Race duplicated.');
+    }
+
+    function deleteActiveRace() {
+      if (appState.races.length <= 1) {
+        setSaveStatus('Keep at least one race.');
+        return;
+      }
+
+      const race = activeRace();
+      const ok = window.confirm(`Delete "${race.label || 'Untitled race'}"?`);
+      if (!ok) return;
+
+      appState.races = appState.races.filter((item) => item.id !== appState.activeRaceId);
+      appState.activeRaceId = appState.races[0].id;
+      saveState();
+      renderRaceSelect();
+      loadRaceIntoForm(activeRace());
+      setSaveStatus('Race deleted.');
     }
 
     function readCandidates() {
@@ -480,6 +782,8 @@
 
     function calculate() {
       errorBox.textContent = '';
+      updateActiveRaceFromForm();
+
       try {
         const candidates = readCandidates();
         const selectedRadio = document.querySelector('input[name="selectedCandidate"]:checked');
@@ -492,6 +796,14 @@
         if (remainingRaw === '') throw new Error('Enter estimated remaining vote.');
         const remaining = Number(remainingRaw);
         if (!Number.isFinite(remaining) || remaining < 0) throw new Error('Estimated remaining vote must be 0 or more.');
+
+        const voteInRaw = voteInPercentInput.value.trim();
+        if (voteInRaw !== '') {
+          const voteIn = Number(voteInRaw);
+          if (!Number.isFinite(voteIn) || voteIn < 0 || voteIn > 100) {
+            throw new Error('Vote in % reference must be between 0 and 100.');
+          }
+        }
 
         const totalCurrentVotes = candidates.reduce((sum, c) => sum + c.votes, 0);
         const strongestOpponent = candidates
@@ -571,27 +883,35 @@
             summaryModeText = 'finish in 1st';
             break;
           case 'threshold':
-            summaryModeText = `hit ${thresholdPercent}%`; break;
+            summaryModeText = `hit ${thresholdPercent}%`;
+            break;
           case 'majority':
-            summaryModeText = 'win a majority'; break;
+            summaryModeText = 'win a majority';
+            break;
           case 'first_and_threshold':
-            summaryModeText = `finish in 1st and hit ${thresholdPercent}%`; break;
+            summaryModeText = `finish in 1st and hit ${thresholdPercent}%`;
+            break;
           case 'first_and_majority':
-            summaryModeText = 'finish in 1st and win a majority'; break;
+            summaryModeText = 'finish in 1st and win a majority';
+            break;
         }
+
+        const raceLabel = raceNameInput.value.trim() || 'Untitled race';
+        const voteInNote = voteInPercentInput.value.trim() !== '' ? ` (${voteInPercentInput.value.trim()}% vote in reference)` : '';
 
         if (!Number.isFinite(requiredShare)) {
-          summaryText.textContent = `${selected.name} cannot still ${summaryModeText} because there is no estimated remaining vote left and the requirement has not already been met.`;
+          summaryText.textContent = `${raceLabel}${voteInNote}: ${selected.name} cannot still ${summaryModeText} because there is no estimated remaining vote left and the requirement has not already been met.`;
         } else {
-          summaryText.textContent = `${selected.name} needs ${formatPercent(requiredShare)} of the estimated outstanding vote to ${summaryModeText}.`;
+          summaryText.textContent = `${raceLabel}${voteInNote}: ${selected.name} needs ${formatPercent(requiredShare)} of the estimated outstanding vote to ${summaryModeText}.`;
         }
 
-        detailsBox.innerHTML = reasons.map((r) => `<div>${r}</div>`).join('');
+        detailsBox.innerHTML = reasons.map((r) => `<div>${escapeHtml(r)}</div>`).join('');
         noteText.textContent = (mode === 'first' || mode === 'first_and_threshold' || mode === 'first_and_majority')
           ? 'Finish-in-1st calculations assume every remaining vote not won by the selected candidate goes to the strongest current opponent.'
           : 'Threshold-only calculations are based on the projected final vote total: current total votes plus estimated remaining vote.';
 
-        metaText.textContent = `Selected candidate: ${selected.name}. Current votes: ${formatNumber(selected.votes)}. Projected final total: ${formatNumber(finalTotal)}. Strongest current opponent: ${strongestOpponent.name} with ${formatNumber(strongestOpponent.votes)} votes.`;
+        const voteInMeta = voteInPercentInput.value.trim() !== '' ? ` Vote in reference: ${voteInPercentInput.value.trim()}%.` : '';
+        metaText.textContent = `Selected candidate: ${selected.name}. Current votes: ${formatNumber(selected.votes)}. Projected final total: ${formatNumber(finalTotal)}. Strongest current opponent: ${strongestOpponent.name} with ${formatNumber(strongestOpponent.votes)} votes.${voteInMeta}`;
       } catch (error) {
         setStatus('Check inputs', 'bad');
         percentNeeded.textContent = '—';
@@ -605,15 +925,43 @@
     }
 
     addCandidateBtn.addEventListener('click', () => {
-      createCandidateRow();
+      createCandidateRow('', '', false);
       errorBox.textContent = '';
+      autoSaveActiveRace();
     });
 
-    resetBtn.addEventListener('click', loadExample);
+    resetBtn.addEventListener('click', resetActiveRaceExample);
     calculateBtn.addEventListener('click', calculate);
-    modeSelect.addEventListener('change', showThresholdField);
 
-    loadExample();
+    saveRaceBtn.addEventListener('click', () => {
+      updateActiveRaceFromForm();
+      setSaveStatus('Race saved in this browser.');
+    });
+
+    addRaceBtn.addEventListener('click', addNewRace);
+    duplicateRaceBtn.addEventListener('click', duplicateActiveRace);
+    deleteRaceBtn.addEventListener('click', deleteActiveRace);
+
+    raceSelect.addEventListener('change', () => {
+      updateActiveRaceFromForm();
+      appState.activeRaceId = raceSelect.value;
+      saveState();
+      loadRaceIntoForm(activeRace());
+    });
+
+    [raceNameInput, voteInPercentInput, remainingVotesInput, thresholdPercentInput].forEach((input) => {
+      input.addEventListener('input', autoSaveActiveRace);
+      input.addEventListener('change', autoSaveActiveRace);
+    });
+
+    modeSelect.addEventListener('change', () => {
+      showThresholdField();
+      autoSaveActiveRace();
+    });
+
+    loadState();
+    renderRaceSelect();
+    loadRaceIntoForm(activeRace());
   </script>
 </body>
 </html>
