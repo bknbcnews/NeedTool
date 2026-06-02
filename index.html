@@ -943,9 +943,11 @@
     deleteRaceBtn.addEventListener('click', deleteActiveRace);
 
     raceSelect.addEventListener('change', () => {
+      const nextRaceId = raceSelect.value;
       updateActiveRaceFromForm();
-      appState.activeRaceId = raceSelect.value;
+      appState.activeRaceId = nextRaceId;
       saveState();
+      renderRaceSelect();
       loadRaceIntoForm(activeRace());
     });
 
