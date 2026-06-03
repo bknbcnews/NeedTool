@@ -313,7 +313,7 @@
   <div class="wrap">
     <section class="panel">
       <h1>Outstanding Vote Calculator</h1>
-      <p class="lead">Estimate what share of the remaining vote any candidate needs to finish in first, hit a custom threshold, win a majority, or satisfy both conditions at once.</p>
+      <p class="lead">Estimate what share of the remaining vote any candidate needs to finish in first, finish in the top two, hit a custom threshold, win a majority, or satisfy combined conditions.</p>
     </section>
 
     <section class="panel">
@@ -383,6 +383,7 @@
             <label for="mode">Rule</label>
             <select id="mode">
               <option value="first">Finish in 1st</option>
+              <option value="top_two">Finish in top 2 / advance</option>
               <option value="threshold">Reach custom threshold</option>
               <option value="majority">Reach majority (50% + 1 vote)</option>
               <option value="first_and_threshold">Finish in 1st and reach custom threshold</option>
@@ -419,9 +420,9 @@
       <div class="big-number" id="percentNeeded">—</div>
       <div class="sub-number" id="votesNeeded">—</div>
 
-      <div class="formula-box" id="detailsBox">The result will show the selected candidate’s minimum required share of outstanding vote under the conservative assumption that every remaining vote not won by that candidate goes to the strongest opponent when the goal includes finishing in first.</div>
+      <div class="formula-box" id="detailsBox">The result will show the selected candidate’s minimum required share of outstanding vote. For finish-in-1st and top-two calculations, it uses a conservative head-to-head assumption against the relevant opponent.</div>
 
-      <p class="note" id="noteText">For finish-in-1st calculations, the widget assumes all remaining votes not won by the selected candidate go to the strongest current opponent.</p>
+      <p class="note" id="noteText">For finish-in-1st and top-two calculations, the widget assumes all remaining votes not won by the selected candidate go to the relevant opponent being tested.</p>
       <p class="small" id="metaText"></p>
     </section>
   </div>
@@ -504,8 +505,8 @@
       setStatus('Waiting for input', 'warn');
       percentNeeded.textContent = '—';
       votesNeeded.textContent = '—';
-      detailsBox.textContent = 'The result will show the selected candidate’s minimum required share of outstanding vote under the conservative assumption that every remaining vote not won by that candidate goes to the strongest opponent when the goal includes finishing in first.';
-      noteText.textContent = 'For finish-in-1st calculations, the widget assumes all remaining votes not won by the selected candidate go to the strongest current opponent.';
+      detailsBox.textContent = 'The result will show the selected candidate’s minimum required share of outstanding vote. For finish-in-1st and top-two calculations, it uses a conservative head-to-head assumption against the relevant opponent.';
+      noteText.textContent = 'For finish-in-1st and top-two calculations, the widget assumes all remaining votes not won by the selected candidate go to the relevant opponent being tested.';
       metaText.textContent = '';
       errorBox.textContent = '';
     }
@@ -806,9 +807,11 @@
         }
 
         const totalCurrentVotes = candidates.reduce((sum, c) => sum + c.votes, 0);
-        const strongestOpponent = candidates
+        const opponentsByVotes = candidates
           .filter((c) => c.id !== selected.id)
-          .sort((a, b) => b.votes - a.votes)[0];
+          .sort((a, b) => b.votes - a.votes);
+        const strongestOpponent = opponentsByVotes[0];
+        const topTwoTargetOpponent = opponentsByVotes.length >= 2 ? opponentsByVotes[1] : null;
 
         const mode = modeSelect.value;
         const needsThreshold = mode === 'threshold' || mode === 'first_and_threshold';
@@ -826,6 +829,7 @@
         const finalTotal = totalCurrentVotes + remaining;
 
         let firstVotesNeeded = null;
+        let topTwoVotesNeeded = null;
         let thresholdVotesNeeded = null;
         let majorityVotesNeeded = null;
         const reasons = [];
@@ -834,6 +838,17 @@
           const strictNeed = (strongestOpponent.votes - selected.votes + remaining) / 2;
           firstVotesNeeded = Math.max(0, ceilStrict(strictNeed));
           reasons.push(`To finish ahead of ${strongestOpponent.name}, ${selected.name} must get at least ${formatNumber(firstVotesNeeded)} of the ${formatNumber(remaining)} estimated outstanding votes under the conservative assumption that every other remaining vote goes to ${strongestOpponent.name}.`);
+        }
+
+        if (mode === 'top_two') {
+          if (!topTwoTargetOpponent) {
+            topTwoVotesNeeded = 0;
+            reasons.push(`${selected.name} is guaranteed to finish in the top two because this race has only two candidates.`);
+          } else {
+            const strictNeed = (topTwoTargetOpponent.votes - selected.votes + remaining) / 2;
+            topTwoVotesNeeded = Math.max(0, ceilStrict(strictNeed));
+            reasons.push(`To finish in the top two, ${selected.name} must finish ahead of ${topTwoTargetOpponent.name}, allowing one stronger opponent to finish ahead. Under the conservative assumption that every other remaining vote goes to ${topTwoTargetOpponent.name}, ${selected.name} must get at least ${formatNumber(topTwoVotesNeeded)} of the ${formatNumber(remaining)} estimated outstanding votes.`);
+          }
         }
 
         if (mode === 'threshold' || mode === 'first_and_threshold') {
@@ -848,7 +863,7 @@
           reasons.push(`To win a majority, ${selected.name} must finish with ${formatNumber(requiredFinalVotes)} votes, which is 50% plus 1 vote of the projected final total.`);
         }
 
-        const requirements = [firstVotesNeeded, thresholdVotesNeeded, majorityVotesNeeded].filter((v) => v !== null);
+        const requirements = [firstVotesNeeded, topTwoVotesNeeded, thresholdVotesNeeded, majorityVotesNeeded].filter((v) => v !== null);
         const requiredVotes = Math.max(...requirements, 0);
 
         let requiredShare;
@@ -882,6 +897,9 @@
           case 'first':
             summaryModeText = 'finish in 1st';
             break;
+          case 'top_two':
+            summaryModeText = 'finish in the top two';
+            break;
           case 'threshold':
             summaryModeText = `hit ${thresholdPercent}%`;
             break;
@@ -906,19 +924,24 @@
         }
 
         detailsBox.innerHTML = reasons.map((r) => `<div>${escapeHtml(r)}</div>`).join('');
-        noteText.textContent = (mode === 'first' || mode === 'first_and_threshold' || mode === 'first_and_majority')
-          ? 'Finish-in-1st calculations assume every remaining vote not won by the selected candidate goes to the strongest current opponent.'
-          : 'Threshold-only calculations are based on the projected final vote total: current total votes plus estimated remaining vote.';
+        if (mode === 'first' || mode === 'first_and_threshold' || mode === 'first_and_majority') {
+          noteText.textContent = 'Finish-in-1st calculations assume every remaining vote not won by the selected candidate goes to the strongest current opponent.';
+        } else if (mode === 'top_two') {
+          noteText.textContent = 'Top-two calculations allow one opponent to finish ahead, then test the selected candidate against the next-strongest opponent under a conservative head-to-head assumption.';
+        } else {
+          noteText.textContent = 'Threshold-only calculations are based on the projected final vote total: current total votes plus estimated remaining vote.';
+        }
 
         const voteInMeta = voteInPercentInput.value.trim() !== '' ? ` Vote in reference: ${voteInPercentInput.value.trim()}%.` : '';
-        metaText.textContent = `Selected candidate: ${selected.name}. Current votes: ${formatNumber(selected.votes)}. Projected final total: ${formatNumber(finalTotal)}. Strongest current opponent: ${strongestOpponent.name} with ${formatNumber(strongestOpponent.votes)} votes.${voteInMeta}`;
+        const topTwoMeta = topTwoTargetOpponent ? ` Top-two cutoff opponent tested: ${topTwoTargetOpponent.name} with ${formatNumber(topTwoTargetOpponent.votes)} votes.` : '';
+        metaText.textContent = `Selected candidate: ${selected.name}. Current votes: ${formatNumber(selected.votes)}. Projected final total: ${formatNumber(finalTotal)}. Strongest current opponent: ${strongestOpponent.name} with ${formatNumber(strongestOpponent.votes)} votes.${topTwoMeta}${voteInMeta}`;
       } catch (error) {
         setStatus('Check inputs', 'bad');
         percentNeeded.textContent = '—';
         votesNeeded.textContent = '—';
         summaryText.textContent = 'Please correct the inputs and try again.';
         detailsBox.textContent = 'The calculator needs valid vote totals, a selected candidate, and estimated remaining vote.';
-        noteText.textContent = 'For finish-in-1st calculations, the widget assumes all remaining votes not won by the selected candidate go to the strongest current opponent.';
+        noteText.textContent = 'For finish-in-1st and top-two calculations, the widget assumes all remaining votes not won by the selected candidate go to the relevant opponent being tested.';
         metaText.textContent = '';
         errorBox.textContent = error.message;
       }
